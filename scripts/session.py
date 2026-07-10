@@ -1,36 +1,42 @@
 #!/usr/bin/env python3
-"""ah-talent-finder session manager.
+"""Session manager for the AI Talent Discovery System (ah-talent-finder).
 
-Handles all mechanical operations: folder creation, state tracking,
-archive file writing, progress management. The AI reads this script's
-JSON output and focuses on conversation + analysis.
+Handles all mechanical operations so the AI can focus on conversation
+and analysis rather than file I/O and state tracking.
 
 Usage:
-  python scripts/session.py check          # Check if session exists
-  python scripts/session.py init           # Create archive folder + files
-  python scripts/session.py reset          # Clear all session files
-  python scripts/session.py status         # Print current progress
-  python scripts/session.py progress --node "Step1-节点2"  # Update progress
-  python scripts/session.py save --node "Step1-节点1" --field "基本面" \
-      --content "身份：自由职业者\\n城市：南京"
-  python scripts/session.py save-file --file "04-内心原密码报告.md" \
-      --content "完整的报告内容..."
+    python3 scripts/session.py check
+    python3 scripts/session.py init
+    python3 scripts/session.py reset
+    python3 scripts/session.py status
+    python3 scripts/session.py progress --node "Step1-节点2"
+    python3 scripts/session.py save --node "Step1-节点1" \
+        --field "基本面" --stdin < content.txt
+    python3 scripts/session.py save-report --node "Step1-节点8" \
+        --stdin < report.md
+    python3 scripts/session.py read-file --file "01-轻量画像.md"
+    python3 scripts/session.py set-user --name "..." --identity "..."
+    python3 scripts/session.py set-path --path deep
 """
+
+from __future__ import annotations
 
 import argparse
 import json
-import os
+import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
 
-# ── path resolution ──────────────────────────────────────────────
+
+# ---------------------------------------------------------------------------
+# Path resolution
+# ---------------------------------------------------------------------------
 
 def _vault_root() -> Path:
-    """Detect vault root from this script's location.
+    """Detect Obsidian vault root from this script's location.
 
     .claude/skills/ah-talent-finder/scripts/session.py  ->  vault root
-                       ^^^^^^^^^^^^^^^^^^^^  skill dir
     """
     return Path(__file__).resolve().parent.parent.parent.parent
 
@@ -43,10 +49,12 @@ def _session_file() -> Path:
     return _archive_dir() / ".session-state.json"
 
 
-# ── node -> archive file mapping ─────────────────────────────────
+# ---------------------------------------------------------------------------
+# Node-to-file mapping
+# ---------------------------------------------------------------------------
 
-NODE_FILE_MAP = {
-    # Step1 nodes all write to 01-轻量画像.md
+# fmt: off
+_NODE_FILE_MAP: dict[str, str] = {
     "Step1-节点1": "01-轻量画像.md",
     "Step1-节点2": "01-轻量画像.md",
     "Step1-节点3": "01-轻量画像.md",
@@ -55,18 +63,15 @@ NODE_FILE_MAP = {
     "Step1-节点6": "01-轻量画像.md",
     "Step1-节点7": "01-轻量画像.md",
     "Step1-节点8": "01-轻量画像.md",
-    # Step2 nodes
     "Step2-节点1": "02-过去信息摘要.md",
     "Step2-节点2": "03-内在信息摘要.md",
     "Step2-节点3": "04-内心原密码报告.md",
-    # Step3
     "Step3-方向推荐": "05-职业方向清单.md",
     "Step3-验证方案": "06-验证行动清单.md",
-    # Step4
     "Step4": "07-命理验证报告.md",
 }
 
-NODE_ORDER = [
+_NODE_ORDER: list[str] = [
     "Step1-节点1", "Step1-节点2", "Step1-节点3", "Step1-节点4",
     "Step1-节点5", "Step1-节点6", "Step1-节点7", "Step1-节点8",
     "Step2-节点1", "Step2-节点2", "Step2-节点3",
@@ -74,9 +79,20 @@ NODE_ORDER = [
     "Step4",
 ]
 
-# ── state helpers ────────────────────────────────────────────────
+_ARCHIVE_FILES: list[str] = [
+    "01-轻量画像.md", "02-过去信息摘要.md", "03-内在信息摘要.md",
+    "04-内心原密码报告.md", "05-职业方向清单.md",
+    "06-验证行动清单.md", "07-命理验证报告.md",
+]
+# fmt: on
+
+
+# ---------------------------------------------------------------------------
+# State helpers
+# ---------------------------------------------------------------------------
 
 def _load_state() -> dict:
+    """Load session state from JSON file."""
     sf = _session_file()
     if sf.exists():
         return json.loads(sf.read_text(encoding="utf-8"))
@@ -84,6 +100,7 @@ def _load_state() -> dict:
 
 
 def _save_state(state: dict) -> None:
+    """Persist session state to JSON file."""
     _archive_dir().mkdir(parents=True, exist_ok=True)
     state["last_updated"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
     _session_file().write_text(
@@ -92,10 +109,22 @@ def _save_state(state: dict) -> None:
     )
 
 
-# ── commands ─────────────────────────────────────────────────────
+def _ok(**kwargs) -> str:
+    """Format a success JSON response."""
+    return json.dumps({"status": "ok", **kwargs}, ensure_ascii=False)
+
+
+def _err(msg: str) -> str:
+    """Format an error JSON response."""
+    return json.dumps({"error": msg}, ensure_ascii=False)
+
+
+# ---------------------------------------------------------------------------
+# Commands
+# ---------------------------------------------------------------------------
 
 def cmd_check() -> None:
-    """Print session existence + current node as JSON."""
+    """Check whether a session exists, print state as JSON."""
     sf = _session_file()
     if not sf.exists():
         print(json.dumps({"has_session": False}))
@@ -113,34 +142,27 @@ def cmd_check() -> None:
 
 
 def cmd_init() -> None:
-    """Create archive folder and all placeholder files."""
+    """Create archive directory and initialise all placeholder files."""
     ad = _archive_dir()
     ad.mkdir(parents=True, exist_ok=True)
 
-    # README
+    # README for the archive folder
     readme = ad / "README.md"
     if not readme.exists():
         readme.write_text(
             "# AI天赋发现\n\n"
-            "本文件夹由AI天赋发现系统自动管理。\n"
+            "本文件夹由 AI 天赋发现系统自动管理。\n"
             "所有对话存档保存在本地，不会上传到任何地方。\n",
             encoding="utf-8",
         )
 
     # Placeholder archive files
-    for i in range(1, 8):
-        f = ad / f"0{i}-轻量画像.md" if i == 1 else None
-    filenames = [
-        "01-轻量画像.md", "02-过去信息摘要.md", "03-内在信息摘要.md",
-        "04-内心原密码报告.md", "05-职业方向清单.md",
-        "06-验证行动清单.md", "07-命理验证报告.md",
-    ]
-    for fn in filenames:
+    for fn in _ARCHIVE_FILES:
         f = ad / fn
         if not f.exists():
             f.write_text("", encoding="utf-8")
 
-    # Init session state
+    # Initial session state
     _save_state({
         "current_node": "Step1-节点1",
         "completed_nodes": [],
@@ -148,48 +170,47 @@ def cmd_init() -> None:
         "user": {},
     })
 
-    print(json.dumps({"status": "ok", "action": "initialized"}))
+    print(_ok(action="initialized"))
 
 
 def cmd_reset() -> None:
-    """Remove all session files, keep folder."""
-    import shutil
+    """Remove all session files (archive directory is recreated on init)."""
     ad = _archive_dir()
     if ad.exists():
         shutil.rmtree(ad)
-    print(json.dumps({"status": "ok", "action": "reset"}))
+    print(_ok(action="reset"))
 
 
 def cmd_status() -> None:
-    """Human-readable progress display."""
+    """Print human-readable session progress."""
     state = _load_state()
     if not state:
-        print("无进行中的会话。")
+        print("No active session.")
         return
 
-    cn = state.get("current_node", "未知")
+    cn = state.get("current_node", "unknown")
     completed = state.get("completed_nodes", [])
     path = state.get("path", "light")
     user = state.get("user", {})
 
-    print(f"当前节点: {cn}")
-    print(f"已完成:   {', '.join(completed) if completed else '(无)'}")
-    print(f"路径:     {'深度版' if path == 'deep' else '轻量版'}")
+    print(f"Current node:  {cn}")
+    print(f"Completed:     {', '.join(completed) if completed else '(none)'}")
+    print(f"Path:          {'Deep' if path == 'deep' else 'Light'}")
     if user:
-        print(f"用户:     {user.get('name', '')} / {user.get('identity', '')} / {user.get('city', '')}")
-    print(f"更新时间: {state.get('last_updated', '')}")
+        print(f"User:          {user.get('name', '')} / "
+              f"{user.get('identity', '')} / {user.get('city', '')}")
+    print(f"Last updated:  {state.get('last_updated', '')}")
 
 
 def cmd_progress(node: str) -> None:
-    """Update current node in session state."""
+    """Advance session progress to *node*."""
     state = _load_state()
     if not state:
-        print(json.dumps({"error": "no session, run init first"}))
+        print(_err("No session. Run `init` first."))
         sys.exit(1)
 
-    # Mark previous node as completed if not already
     prev = state.get("current_node", "")
-    completed = state.get("completed_nodes", [])
+    completed: list[str] = state.get("completed_nodes", [])
     if prev and prev not in completed:
         completed.append(prev)
 
@@ -197,12 +218,12 @@ def cmd_progress(node: str) -> None:
     state["completed_nodes"] = completed
     _save_state(state)
 
-    # Determine next node hint
+    # Next node hint
     next_node = ""
     try:
-        idx = NODE_ORDER.index(node)
-        if idx + 1 < len(NODE_ORDER):
-            next_node = NODE_ORDER[idx + 1]
+        idx = _NODE_ORDER.index(node)
+        if idx + 1 < len(_NODE_ORDER):
+            next_node = _NODE_ORDER[idx + 1]
     except ValueError:
         pass
 
@@ -214,84 +235,104 @@ def cmd_progress(node: str) -> None:
     }, ensure_ascii=False))
 
 
-def cmd_save(node: str, field: str, content: str, use_stdin: bool = False) -> None:
-    """Append a field to the appropriate archive file."""
-    if use_stdin:
-        content = sys.stdin.read()
+def cmd_save(node: str, field: str, content: str) -> None:
+    """Append a named *field* to the archive file for *node*.
+
+    If the field already exists in the file it is replaced in-place.
+    """
     state = _load_state()
     if not state:
-        print(json.dumps({"error": "no session, run init first"}))
+        print(_err("No session. Run `init` first."))
         sys.exit(1)
 
-    filename = NODE_FILE_MAP.get(node)
+    filename = _NODE_FILE_MAP.get(node)
     if not filename:
-        print(json.dumps({"error": f"unknown node: {node}"}))
+        print(_err(f"Unknown node: {node}"))
         sys.exit(1)
 
     filepath = _archive_dir() / filename
-
-    # Build markdown block
     existing = filepath.read_text(encoding="utf-8") if filepath.exists() else ""
 
+    # Build new block
     block = f"\n## {field}\n\n{content}\n"
-
-    # Avoid duplicate fields
     marker = f"\n## {field}\n"
+
     if marker in existing:
-        # Replace existing field block
         parts = existing.split(marker, 1)
         before = parts[0]
-        after = parts[1].split("\n## ", 1) if "\n## " in parts[1] else (parts[1], "")
-        if isinstance(after, list) and len(after) > 1:
-            existing = before + block + "## " + after[1]
-        else:
-            existing = before + block
+        rest = parts[1].split("\n## ", 1)
+        after = f"\n## {rest[1]}" if len(rest) > 1 else ""
+        existing = before + block + after
     else:
         existing += block
 
     filepath.write_text(existing, encoding="utf-8")
-    print(json.dumps({
-        "status": "ok",
-        "file": filename,
-        "field": field,
-    }, ensure_ascii=False))
+    print(_ok(file=filename, field=field))
 
 
-def cmd_save_file(file: str, content: str, use_stdin: bool = False) -> None:
-    """Overwrite an entire archive file with new content."""
-    if use_stdin:
-        content = sys.stdin.read()
+def cmd_save_file(file: str, content: str) -> None:
+    """Overwrite *file* in the archive directory with *content*."""
     state = _load_state()
     if not state:
-        print(json.dumps({"error": "no session, run init first"}))
+        print(_err("No session. Run `init` first."))
         sys.exit(1)
 
     filepath = _archive_dir() / file
     filepath.write_text(content, encoding="utf-8")
-    print(json.dumps({
-        "status": "ok",
-        "file": file,
-        "size": len(content),
-    }, ensure_ascii=False))
+    print(_ok(file=file, size=len(content)))
+
+
+def cmd_save_report(node: str, content: str) -> None:
+    """Save a full report and advance progress atomically."""
+    filename = _NODE_FILE_MAP.get(node)
+    if not filename:
+        print(_err(f"Unknown node: {node}"))
+        sys.exit(1)
+
+    filepath = _archive_dir() / filename
+    filepath.write_text(content, encoding="utf-8")
+
+    # Advance progress
+    state = _load_state()
+    prev = state.get("current_node", "")
+    completed: list[str] = state.get("completed_nodes", [])
+    if prev and prev not in completed:
+        completed.append(prev)
+    state["current_node"] = node
+    state["completed_nodes"] = completed
+    if node == "Step2-节点3":
+        state["path"] = "deep"
+    _save_state(state)
+
+    print(_ok(file=filename, size=len(content)))
+
+
+def cmd_read_file(file: str) -> None:
+    """Print contents of an archive file to stdout."""
+    filepath = _archive_dir() / file
+    if filepath.exists():
+        print(filepath.read_text(encoding="utf-8"))
+    else:
+        print("")
 
 
 def cmd_set_path(path: str) -> None:
-    """Set session path to 'light' or 'deep'."""
+    """Set session path to *light* or *deep*."""
     if path not in ("light", "deep"):
-        print(json.dumps({"error": "path must be 'light' or 'deep'"}))
+        print(_err("Path must be 'light' or 'deep'."))
         sys.exit(1)
 
     state = _load_state()
     state["path"] = path
     _save_state(state)
-    print(json.dumps({"status": "ok", "path": path}))
+    print(_ok(path=path))
 
 
 def cmd_set_user(name: str = "", identity: str = "", city: str = "") -> None:
-    """Update user info in session state."""
+    """Update user metadata in session state."""
     state = _load_state()
     if not state:
-        print(json.dumps({"error": "no session, run init first"}))
+        print(_err("No session. Run `init` first."))
         sys.exit(1)
 
     user = state.get("user", {})
@@ -303,86 +344,57 @@ def cmd_set_user(name: str = "", identity: str = "", city: str = "") -> None:
         user["city"] = city
     state["user"] = user
     _save_state(state)
-    print(json.dumps({"status": "ok", "user": user}, ensure_ascii=False))
+    print(_ok(user=user))
 
 
-def cmd_read_file(file: str) -> None:
-    """Print the contents of an archive file."""
-    filepath = _archive_dir() / file
-    if filepath.exists():
-        print(filepath.read_text(encoding="utf-8"))
-    else:
-        print("")
-
-
-def cmd_save_full_report(node: str, content: str, use_stdin: bool = False) -> None:
-    """Save a full report (node 8, Step2-节点3, Step3 outputs) to the right file."""
-    if use_stdin:
-        content = sys.stdin.read()
-
-    filename = NODE_FILE_MAP.get(node)
-    if not filename:
-        print(json.dumps({"error": f"unknown node: {node}"}))
-        sys.exit(1)
-
-    filepath = _archive_dir() / filename
-    filepath.write_text(content, encoding="utf-8")
-    # Update progress + path if deep
-    state = _load_state()
-    prev = state.get("current_node", "")
-    completed = state.get("completed_nodes", [])
-    if prev and prev not in completed:
-        completed.append(prev)
-    state["current_node"] = node
-    state["completed_nodes"] = completed
-    if node == "Step2-节点3":
-        state["path"] = "deep"
-    _save_state(state)
-
-    print(json.dumps({
-        "status": "ok",
-        "file": filename,
-        "size": len(content),
-    }, ensure_ascii=False))
-
-
-# ── CLI ──────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="ah-talent-finder session manager")
+    parser = argparse.ArgumentParser(
+        description="Session manager for ah-talent-finder"
+    )
     sub = parser.add_subparsers(dest="command")
 
-    sub.add_parser("check", help="Check if session exists (JSON output)")
-    sub.add_parser("init", help="Create archive folder + placeholder files")
-    sub.add_parser("reset", help="Delete all session files")
+    sub.add_parser("check", help="Check if a session exists (JSON)")
+    sub.add_parser("init", help="Create archive directory and files")
+    sub.add_parser("reset", help="Delete all session data")
     sub.add_parser("status", help="Print human-readable progress")
 
-    p = sub.add_parser("progress", help="Update current node")
-    p.add_argument("--node", required=True, help="Node ID, e.g. Step1-节点2")
+    p = sub.add_parser("progress", help="Advance to the given node")
+    p.add_argument("--node", required=True,
+                   help="Node ID, e.g. Step1-节点2")
 
-    p = sub.add_parser("save", help="Append a field to the archive file for this node")
+    p = sub.add_parser("save", help="Append a field to the node's archive file")
     p.add_argument("--node", required=True)
     p.add_argument("--field", required=True)
-    p.add_argument("--content", default="", help="Markdown content (or use --stdin)")
-    p.add_argument("--stdin", action="store_true", help="Read content from stdin")
+    p.add_argument("--content", default="",
+                   help="Markdown content (or use --stdin)")
+    p.add_argument("--stdin", action="store_true",
+                   help="Read content from stdin")
 
-    p = sub.add_parser("save-file", help="Overwrite an entire archive file")
-    p.add_argument("--file", required=True, help="Archive filename, e.g. 04-内心原密码报告.md")
+    p = sub.add_parser("save-file", help="Overwrite an archive file")
+    p.add_argument("--file", required=True,
+                   help="Archive filename, e.g. 04-内心原密码报告.md")
     p.add_argument("--content", default="")
-    p.add_argument("--stdin", action="store_true", help="Read content from stdin")
+    p.add_argument("--stdin", action="store_true",
+                   help="Read content from stdin")
 
-    p = sub.add_parser("save-report", help="Save a full report to the right archive file + update progress")
+    p = sub.add_parser("save-report",
+                       help="Save a full report and advance progress")
     p.add_argument("--node", required=True)
     p.add_argument("--content", default="")
-    p.add_argument("--stdin", action="store_true", help="Read content from stdin")
+    p.add_argument("--stdin", action="store_true",
+                   help="Read content from stdin")
 
-    p = sub.add_parser("read-file", help="Print an archive file's contents")
+    p = sub.add_parser("read-file", help="Print an archive file")
     p.add_argument("--file", required=True)
 
-    p = sub.add_parser("set-path", help="Set session path (light/deep)")
+    p = sub.add_parser("set-path", help="Set session path")
     p.add_argument("--path", required=True, choices=["light", "deep"])
 
-    p = sub.add_parser("set-user", help="Update user info")
+    p = sub.add_parser("set-user", help="Update user metadata")
     p.add_argument("--name", default="")
     p.add_argument("--identity", default="")
     p.add_argument("--city", default="")
@@ -392,6 +404,10 @@ def main() -> None:
     if not args.command:
         parser.print_help()
         sys.exit(1)
+
+    # Resolve --stdin content
+    def _content(arg_val: str, use_stdin: bool) -> str:
+        return sys.stdin.read() if use_stdin else arg_val
 
     try:
         if args.command == "check":
@@ -405,19 +421,22 @@ def main() -> None:
         elif args.command == "progress":
             cmd_progress(args.node)
         elif args.command == "save":
-            cmd_save(args.node, args.field, args.content, getattr(args, 'stdin', False))
+            cmd_save(args.node, args.field,
+                     _content(args.content, getattr(args, 'stdin', False)))
         elif args.command == "save-file":
-            cmd_save_file(args.file, args.content, getattr(args, 'stdin', False))
+            cmd_save_file(args.file,
+                          _content(args.content, getattr(args, 'stdin', False)))
         elif args.command == "save-report":
-            cmd_save_full_report(args.node, args.content, getattr(args, 'stdin', False))
+            cmd_save_report(args.node,
+                            _content(args.content, getattr(args, 'stdin', False)))
         elif args.command == "read-file":
             cmd_read_file(args.file)
         elif args.command == "set-path":
             cmd_set_path(args.path)
         elif args.command == "set-user":
             cmd_set_user(args.name, args.identity, args.city)
-    except Exception as e:
-        print(json.dumps({"error": str(e)}))
+    except Exception as exc:
+        print(_err(str(exc)))
         sys.exit(1)
 
 
