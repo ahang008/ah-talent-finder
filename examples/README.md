@@ -1,27 +1,25 @@
-# Examples
+# 使用示例
 
-This directory contains example outputs from the talent discovery system.
+## 轻量版会话（约30分钟）
 
-## Example: Light Session (30 min)
+用户完成8个节点的轻量画像收集后，会得到：
 
-A user goes through the 8-node light profile collection and receives:
+- **轻量版画像** (`01-轻量画像.md`)：基本信息、能力证据、心流信号、明确好恶
+- **职业方向清单** (`05-职业方向清单.md`)：5个推荐方向，含匹配度分析
+- **2周验证方案** (`06-验证行动清单.md`)：具体到每一步做什么
 
-- **Light Profile** (`01-轻量画像.md`): Basic info, capability evidence, flow signals, likes/dislikes
-- **Career Directions** (`05-职业方向清单.md`): 5 recommended directions with match analysis
-- **2-Week Validation Plan** (`06-验证行动清单.md`): Concrete, step-by-step verification
+## 深度版会话（约60分钟）
 
-## Example: Deep Session (60 min)
+用户在轻量版基础上继续深挖：
 
-A user continues from the light profile into the deep edition:
+- **过去信息摘要** (`02-过去信息摘要.md`)：原生家庭、成长关键事件、性格底色
+- **内在信息摘要** (`03-内在信息摘要.md`)：阴影/缺点、渴望与恐惧、已有尝试
+- **内心原密码报告** (`04-内心原密码报告.md`)：整合所有信息 + 9框架交叉分析
 
-- **Past Summary** (`02-过去信息摘要.md`): Family of origin, key life events, personality traits
-- **Inner Summary** (`03-内在信息摘要.md`): Shadow traits, fears, desires, past attempts
-- **Inner Code Report** (`04-内心原密码报告.md`): Full integration with 9-framework analysis
+## 含命理交叉验证的完整版
 
-## Example: With Bazi Cross-Validation
-
-- **Bazi Report** (`07-命理验证报告.md`): Classical Chinese metaphysics cross-referenced with psychological frameworks
+- **命理验证报告** (`07-命理验证报告.md`)：八字排盘 + 古典命理 + 现代心理学交叉验证
 
 ---
 
-Note: Actual session files contain personal information and are stored locally on the user's device.
+注意：实际会话文件包含个人隐私信息，均保存在用户本地设备。
