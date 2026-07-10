@@ -156,7 +156,7 @@
 
 ## 完成后存档
 
-将完整命理验证报告写入 `07-命理验证报告.md`，更新 `.session-state.md` 当前进度为 `Step4-完成`。
+用 `scripts/session.py save-report --node "Step4" --stdin` 保存完整命理验证报告到 `07-命理验证报告.md`，然后 `progress --node "Step4"`。
 
 ---
 
