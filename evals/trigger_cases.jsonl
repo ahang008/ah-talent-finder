@@ -1,0 +1,8 @@
+{"id": 1, "prompt": "/天赋", "should_trigger": true, "holdout": false, "note": "slash command"}
+{"id": 2, "prompt": "帮我找天赋", "should_trigger": true, "holdout": false, "note": "exact trigger phrase"}
+{"id": 3, "prompt": "我适合做什么", "should_trigger": true, "holdout": false, "note": "exact trigger phrase"}
+{"id": 4, "prompt": "我不知道自己适合干什么，很迷茫", "should_trigger": true, "holdout": false, "note": "fuzzy match"}
+{"id": 5, "prompt": "手里有几个方向，帮我看看选哪个", "should_trigger": true, "holdout": true, "note": "path B scenario"}
+{"id": 6, "prompt": "帮我算个八字看看运势", "should_trigger": false, "holdout": false, "note": "bazi skill territory"}
+{"id": 7, "prompt": "帮我诊断一下我的商业模式", "should_trigger": false, "holdout": false, "note": "dbs-diagnosis territory"}
+{"id": 8, "prompt": "今天心情不好，就是想聊聊天", "should_trigger": false, "holdout": true, "note": "cyber-xiaowan territory"}
